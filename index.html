@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<!--
+===========================================================================
+ PETA ISI FILE (cari kode "[BAGIAN" / "[SCRIPT" / "[CSS" untuk melompat ke bagian)
+ [CSS]       Gaya khusus fretboard, sidebar
+ [BAGIAN 1]  Header / Navbar (logo, menu, widget level & XP)
+ [BAGIAN 2]  Area konten <main>
+ [BAGIAN 3]  Halaman kurikulum: 3A landing, 3B kurikulum 1, 3C kurikulum 2, 3D isi pelajaran, 3E segera hadir
+ [BAGIAN 4]  Halaman fretboard: 4A simulasi akord + notasi, 4B papan fretboard
+ [BAGIAN 5]  Footer
+ [SCRIPT-A]  Audio (Web Audio API)   [SCRIPT-B] Fretboard & simulasi akord
+ [SCRIPT-C]  KONTEN pelajaran (TEMPAT MENGISI MATERI)   [SCRIPT-D] Render pelajaran
+ [SCRIPT-E]  Navigasi antar halaman   [SCRIPT-F] Inisialisasi
+
+ CARA DEPLOY: file ini cukup bernama index.html di root repo. Tidak perlu build.
+ CATATAN: semua teks di file ini adalah teks asli. Jangan menempelkan teks/gambar/video
+ dari situs lain tanpa izin tertulis pemiliknya.
+===========================================================================
+-->
+<html lang="id" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BassLab - Belajar Bass Interaktif</title>
+    <meta name="description" content="Belajar bass dari nol dengan kurikulum bertahap, fretboard interaktif, dan simulasi akord.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%8E%B5%3C/text%3E%3C/svg%3E">
+    <!-- Tailwind versi CDN: praktis untuk prototipe. Untuk produksi jangka panjang, ganti dengan CSS hasil build. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Warna merek (brand-orange, brand-card, dll). Ganti nilai hex di bawah untuk mengubah tema di seluruh web. -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            orange: '#ff8c00',
+                            dark: '#121212',
+                            card: '#1e1e1e',
+                            border: '#2a2a2a'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        html { scroll-behavior: smooth; }
+
+        /* ===== [CSS] GAYA FRETBOARD: grid kolom, garis senar & fret, tombol nada, badge jari ===== */
+        .fret-grid-row {
+            display: grid;
+            grid-template-columns: 80px 50px repeat(12, minmax(0, 1fr));
+            align-items: center;
+        }
+
+        .fret-cell {
+            position: relative;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Garis Senar Horizontal */
+        .fret-cell::before {
+            content: '';
+            position: absolute;
+            left: 0; right: 0; top: 50%;
+            height: 3px;
+            background-color: #3a4253;
+            transform: translateY(-50%);
+            z-index: 1;
+        }
+
+        /* Garis Fret Vertikal */
+        .fret-cell::after {
+            content: '';
+            position: absolute;
+            right: 0; top: 0; bottom: 0;
+            width: 2px;
+            background-color: #252e42;
+            z-index: 1;
+        }
+
+        /* Divider Nut Fret 0 */
+        .nut-cell::after {
+            width: 4px;
+            background-color: #64748b;
+        }
+
+        /* Tombol Bulat Glowing Nada */
+        .note-btn {
+            position: relative;
+            z-index: 10;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: #f59e0b;
+            color: #000000;
+            font-weight: 800;
+            font-size: 11px;
+            border: 2px solid #fbbf24;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.8);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.15s, background-color 0.15s, box-shadow 0.15s;
+        }
+
+        .note-btn:hover {
+            transform: scale(1.15);
+            background-color: #fbbf24;
+        }
+
+        .note-btn.dimmed {
+            opacity: 0.2;
+            box-shadow: none;
+            background-color: #4b5563;
+            border-color: #6b7280;
+            color: #9ca3af;
+        }
+
+
+        /* Styling Anggota Chord & Animasi Simulasi */
+        .note-btn.chord-member {
+            background-color: #38bdf8 !important;
+            border-color: #7dd3fc !important;
+            color: #0f172a !important;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.9) !important;
+            opacity: 1 !important;
+        }
+
+        .note-btn.active-sim {
+            background-color: #ef4444 !important;
+            border-color: #fca5a5 !important;
+            color: #ffffff !important;
+            box-shadow: 0 0 20px #ef4444, 0 0 30px #f87171 !important;
+            transform: scale(1.3) !important;
+            z-index: 30 !important;
+        }
+
+        /* Sembunyikan HANYA teks nada (tombol tetap terlihat & bisa diklik). Harus setelah aturan chord-member/active-sim */
+        .note-btn.note-hidden { color: transparent !important; }
+
+        /* ===== [CSS] SIDEBAR KURIKULUM 1: item biasa & item aktif ===== */
+        .sec-link { display: block; padding: 4px 8px; border-radius: 6px; }
+        .sec-link.active-sec { background: rgba(245, 158, 11, 0.15); color: #ffffff; }
+
+        /* Badge Nomor Jari pada Fretboard */
+        .finger-badge {
+            position: absolute;
+            top: -8px;
+            right: -6px;
+            background: #10b981;
+            color: white;
+            font-size: 9px;
+            font-weight: 800;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #047857;
+            z-index: 25;
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<!-- [BODY] latar halaman: ubah bg-[#0f1117] untuk warna dasar, text-gray-200 untuk warna teks -->
+<body class="bg-[#0f1117] text-gray-200 font-sans min-h-screen flex flex-col">
+
+    <!-- =====================================================================
+         [BAGIAN 1] HEADER / NAVBAR  (sticky di atas, tampil di semua halaman)
+         Ubah di sini: logo & nama web, isi menu, widget streak/XP di kanan.
+         ===================================================================== -->
+    <header class="bg-[#161922] border-b border-gray-800 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-8">
+
+                <!-- [1a] LOGO + NAMA WEB (klik = kembali ke halaman Kurikulum). Ganti "BassLab" bila nama berubah -->
+                <button type="button" class="flex items-center gap-2 font-bold text-xl text-brand-orange" onclick="switchTab('kurikulum')">
+                    <span class="p-2 bg-brand-orange text-black rounded-lg">🎵</span>
+                    <span>BassLab</span>
+                </button>
+
+                <!-- [1b] MENU UTAMA (layar besar). data-nav = kunci untuk penanda menu aktif; onclick = tujuan halaman.
+                     Tambah menu baru: salin satu <button>, ubah data-nav, onclick, dan teksnya,
+                     lalu daftarkan tujuannya di fungsi switchTab() pada bagian SCRIPT. -->
+                <nav class="hidden md:flex gap-1 text-sm font-medium" aria-label="Menu utama">
+                    <button type="button" data-nav="kurikulum" onclick="switchTab('kurikulum')">Kurikulum</button>
+                    <button type="button" data-nav="fretboard" onclick="switchTab('fretboard')">Fretboard</button>
+                    <button type="button" data-nav="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
+                    <button type="button" data-nav="kuis" onclick="switchTab('kuis')">Kuis Praktik</button>
+                </nav>
+            </div>
+
+            <!-- [1c] WIDGET STATUS PENGGUNA (kanan). Saat ini 0 karena belum ada login.
+                 Nanti diisi dari database (id="hdr-streak", "hdr-level", "hdr-xp"). -->
+            <div class="flex items-center gap-4 text-xs md:text-sm">
+                <div class="hidden sm:flex items-center gap-1 bg-amber-500/10 text-amber-500 px-3 py-1.5 rounded-full border border-amber-500/20">
+                    🔥 <span><span id="hdr-streak">0</span> Hari Streak</span>
+                </div>
+                <div class="flex items-center gap-2 bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-700">
+                    <span class="text-xs text-gray-400">LEVEL <span id="hdr-level">1</span></span>
+                    <span class="text-brand-orange font-bold"><span id="hdr-xp">0</span> XP</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- [1d] MENU UTAMA (layar HP). Isinya harus sama dengan [1b] -->
+        <nav class="md:hidden flex overflow-x-auto gap-1 px-2 py-1.5 border-t border-gray-800 text-sm font-medium" aria-label="Menu utama (HP)">
+            <button type="button" data-nav="kurikulum" onclick="switchTab('kurikulum')">Kurikulum</button>
+            <button type="button" data-nav="fretboard" onclick="switchTab('fretboard')">Fretboard</button>
+            <button type="button" data-nav="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
+            <button type="button" data-nav="kuis" onclick="switchTab('kuis')">Kuis Praktik</button>
+        </nav>
+    </header>
+
+    <!-- =====================================================================
+         [BAGIAN 2] AREA KONTEN UTAMA <main>
+         Berisi beberapa <section> (halaman). Hanya satu yang tampil sekali waktu.
+         ===================================================================== -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6">
+
+        <!-- =====================================================================
+         [BAGIAN 3] HALAMAN KURIKULUM  (3A landing, 3B kurikulum 1, 3C kurikulum 2, 3D isi pelajaran, 3E segera hadir)
+         ===================================================================== -->
+
+        <!-- ---------- [3A] LANDING PAGE: pilihan kurikulum (Gambar 1, 2, 6) ---------- -->
+        <section id="view-landing" class="space-y-6">
+            <!-- [3A-1] Judul halaman -->
+            <div>
+                <h1 class="text-2xl font-bold text-white">Pilih Kurikulum Belajar</h1>
+                <p class="text-sm text-gray-400 mt-1">Belajar bass bertahap dari nol, dilengkapi fretboard interaktif.</p>
+            </div>
+
+            <div class="grid gap-6">
+                <!-- [3A-2] KARTU KURIKULUM 1. Ubah: judul (h2), deskripsi (p), warna latar (kelas from-/via-), tombol -->
+                <div class="bg-brand-card rounded-xl overflow-hidden border border-brand-border hover:border-amber-500/50 transition">
+                    <!-- Area gambar: sekarang gradasi warna. Untuk gambar sendiri: ganti isi div ini dengan <img src="..." class="absolute inset-0 w-full h-full object-cover"> -->
+                    <div class="h-48 bg-gradient-to-r from-orange-950 via-neutral-900 to-black p-6 flex flex-col justify-end relative">
+                        <h2 class="text-2xl font-bold text-brand-orange">BassLab Dasar 1</h2>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <p class="text-gray-300">Kurikulum pemula: menyambung peralatan, mengenal knob, postur, menyetel senar, memetik, menekan fret, dan bermain bersama ketukan.</p>
+                        <button type="button" onclick="openKurikulum1()" class="bg-brand-orange hover:bg-amber-600 text-black font-semibold px-6 py-2.5 rounded-lg transition flex items-center gap-2">
+                            Mulai belajar <span>▶</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- [3A-3] KARTU KURIKULUM 2 -->
+                <div class="bg-brand-card rounded-xl overflow-hidden border border-brand-border hover:border-amber-500/50 transition">
+                    <div class="h-48 bg-gradient-to-r from-amber-950 via-neutral-900 to-black p-6 flex flex-col justify-end relative">
+                        <h2 class="text-2xl font-bold text-brand-orange">BassLab Dasar 2</h2>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <p class="text-gray-300">Kurikulum menengah: tangga nada, nada penyusun akord, akord diminished, dan struktur 12-bar blues.</p>
+                        <button type="button" onclick="openKurikulum2()" class="bg-brand-orange hover:bg-amber-600 text-black font-semibold px-6 py-2.5 rounded-lg transition flex items-center gap-2">
+                            Mulai belajar <span>▶</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- [3A-4] KARTU KURIKULUM 3 (belum aktif: tombol dinonaktifkan). Untuk mengaktifkan, ganti <button disabled> dengan onclick seperti kartu 1/2 -->
+                <div class="bg-brand-card rounded-xl overflow-hidden border border-brand-border">
+                    <div class="h-48 bg-gradient-to-r from-yellow-950 via-neutral-900 to-black p-6 flex flex-col justify-end relative">
+                        <h2 class="text-2xl font-bold text-brand-orange">BassLab Dasar 3</h2>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <p class="text-gray-300">Kurikulum lanjutan: artikulasi (slap, pop, ghost note) dan pemilihan nada saat akord berganti.</p>
+                        <button type="button" disabled class="bg-brand-orange/40 text-black/70 font-semibold px-6 py-2.5 rounded-lg cursor-not-allowed">
+                            Segera hadir
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ---------- [3B] KURIKULUM 1: artikel panjang dengan sidebar section (Gambar 3, 4, 5) ----------
+             Struktur: sidebar kiri [3B-1] + artikel kanan [3B-3..]. Tiap bagian artikel punya id="sec-N"
+             yang harus sama dengan href="#sec-N" di sidebar. Menambah section = tambah <li> di sidebar + <div> di artikel. -->
+        <section id="view-k1-detail" class="hidden">
+            <button type="button" onclick="showView('landing')" class="mb-4 text-sm text-gray-400 hover:text-white flex items-center gap-1">← Kembali ke daftar kurikulum</button>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <!-- [3B-1] SIDEBAR DAFTAR SECTION (klik = lompat ke bagian; bagian yang sedang dibaca disorot otomatis) -->
+                <aside id="k1-sidebar" class="md:col-span-1 bg-brand-card p-4 rounded-xl border border-brand-border h-fit md:sticky md:top-20">
+                    <div class="text-xs text-gray-400 mb-1">Oleh Tim BassLab</div> <!-- UBAH: nama penulis -->
+                    <div class="text-xs text-gray-500 mb-4">± 8 menit baca</div>   <!-- UBAH: estimasi waktu baca -->
+                    <ul class="space-y-1 text-sm font-medium text-brand-orange">
+                        <li><a href="#sec-1" data-sec="sec-1" class="sec-link hover:underline">#1 Colok Kabel</a></li>
+                        <li><a href="#sec-2" data-sec="sec-2" class="sec-link hover:underline">#2 Atur Knob</a></li>
+                        <li><a href="#sec-3" data-sec="sec-3" class="sec-link hover:underline">#3 Posisi Badan</a></li>
+                        <li><a href="#sec-4" data-sec="sec-4" class="sec-link hover:underline">#4 Setel Senar</a></li>
+                        <li><a href="#sec-5" data-sec="sec-5" class="sec-link hover:underline">#5 Memetik</a></li>
+                        <li><a href="#sec-6" data-sec="sec-6" class="sec-link hover:underline">#6 Menekan Fret</a></li>
+                        <li><a href="#sec-7" data-sec="sec-7" class="sec-link hover:underline">#7 Main Bersama Musik</a></li>
+                        <li class="pt-2"><a href="#sec-song" data-sec="sec-song" class="sec-link text-white hover:underline">Lagu Pertamamu</a></li>
+                        <li><a href="#view-k1-detail" class="sec-link text-gray-400 hover:underline">Ke atas</a></li>
+                    </ul>
+                </aside>
+
+                <!-- [3B-2] ARTIKEL UTAMA -->
+                <article class="md:col-span-3 space-y-8 bg-brand-card p-6 rounded-xl border border-brand-border">
+
+                    <!-- [3B-3] KOTAK STATUS AWAL → TARGET. Teks statis; nanti bisa diisi dari data pengguna -->
+                    <div class="grid grid-cols-2 gap-4 bg-black/40 p-4 rounded-lg border border-gray-800">
+                        <div>
+                            <div class="font-bold text-white">Kamu sekarang</div>
+                            <div class="text-sm text-gray-400">Bassist pemula</div>
+                            <div class="text-sm text-gray-400">Level 1, 0 XP</div>
+                        </div>
+                        <div>
+                            <div class="font-bold text-white">Target setelah Dasar 1</div>
+                            <div class="text-sm text-gray-400">Bisa menyetel dan memetik</div>
+                            <div class="text-sm text-gray-400">Level 2 (100 XP)</div>
+                        </div>
+                    </div>
+
+                    <!-- [3B-4] SECTION #1. Ubah teks di dalam <h2> dan <p>. Salin satu blok ini untuk membuat section baru -->
+                    <div id="sec-1" data-section class="scroll-mt-20 space-y-4 pt-4 border-t border-gray-800">
+                        <h2 class="text-xl font-bold text-brand-orange">#1 Colok Kabel</h2>
+                        <p class="text-gray-300 leading-relaxed">Kita mulai dari titik paling awal: kamu belum pernah memegang bass. Sebelum memikirkan cara memetik atau posisi tangan, sambungkan dulu bass ke amplifier dengan kabel instrumen (jack 6,3 mm).</p>
+                        <p class="text-gray-300 leading-relaxed">Turunkan volume bass dan amplifier ke nol sebelum mencolok kabel, lalu naikkan perlahan. Ini mencegah letupan suara yang dapat merusak speaker.</p>
+                        <!-- Kotak lipat (klik untuk buka). Cocok untuk info tambahan -->
+                        <details class="bg-black/30 border border-gray-800 rounded-lg p-3 text-sm text-gray-300">
+                            <summary class="cursor-pointer text-amber-500">Pakai headphone atau audio interface?</summary>
+                            <p class="mt-2 leading-relaxed">Colokkan bass ke input instrumen pada audio interface, lalu sambungkan headphone ke output interface. Atur level input agar indikator tidak merah (suara pecah).</p>
+                        </details>
+                    </div>
+
+                    <!-- [3B-5] SECTION #2 -->
+                    <div id="sec-2" data-section class="scroll-mt-20 space-y-4 pt-4 border-t border-gray-800">
+                        <h2 class="text-xl font-bold text-brand-orange">#2 Atur Knob</h2>
+                        <p class="text-gray-300 leading-relaxed">Bass dan amplifier punya beberapa knob, dan itu normal. Di bass, yang utama adalah Volume (keras-pelan) dan Tone (terang-gelapnya suara).</p>
+                        <p class="text-gray-300 leading-relaxed">Di amplifier biasanya ada Gain, Bass, Mid, Treble, dan Master. Mulailah dengan semua knob EQ di posisi tengah. Targetnya sederhana: suara jelas dan tidak pecah.</p>
+                    </div>
+
+                    <!-- [3B-6] SECTION #3 -->
+                    <div id="sec-3" data-section class="scroll-mt-20 space-y-4 pt-4 border-t border-gray-800">
+                        <h2 class="text-xl font-bold text-brand-orange">#3 Posisi Badan</h2>
+                        <p class="text-gray-300 leading-relaxed">Atur strap agar tinggi bass sama saat berdiri maupun duduk. Badan rileks, bahu tidak terangkat.</p>
+                        <p class="text-gray-300 leading-relaxed">Tangan kiri menekan senar dengan ibu jari bersandar di belakang leher. Tangan kanan memetik di atas pickup dengan pergelangan tetap lurus. Jika tangan nyeri atau kesemutan, berhenti dan ubah posisinya.</p>
+                    </div>
+
+                    <!-- [3B-7] SECTION #4 (ada tombol ke tab Fretboard) -->
+                    <div id="sec-4" data-section class="scroll-mt-20 space-y-4 pt-4 border-t border-gray-800">
+                        <h2 class="text-xl font-bold text-brand-orange">#4 Setel Senar</h2>
+                        <p class="text-gray-300 leading-relaxed">Bass 4 senar disetel E, A, D, G dari senar paling tebal ke paling tipis, dengan frekuensi sekitar 41,20 Hz, 55,00 Hz, 73,42 Hz, dan 98,00 Hz.</p>
+                        <p class="text-gray-300 leading-relaxed">Petik senar kosong, lihat nada di tuner, lalu putar tuning peg sampai tepat. Jika terlalu tinggi, turunkan sedikit lalu naikkan lagi ke nada yang benar.</p>
+                        <button type="button" onclick="switchTab('fretboard')" class="text-sm bg-brand-orange hover:bg-amber-600 text-black font-semibold px-4 py-2 rounded-lg">Dengarkan nada tiap senar di Fretboard</button>
+                    </div>
+
+                    <!-- [3B-8] SECTION #5 -->
+                    <div id="sec-5" data-section class="scroll-mt-20 space-y-4 pt-4 border-t border-gray-800">
+                        <h2 class="text-xl font-bold text-brand-orange">#5 Memetik</h2>
+                        <p class="text-gray-300 leading-relaxed">Petik senar bergantian dengan telunjuk dan jari tengah. Setelah memetik, jari berhenti di senar yang lebih tebal atau di pickup. Mulai pelan: yang dilatih adalah kerataan suara, bukan kecepatan.</p>
+                    </div>
+
+                    <!-- [3B-9] SECTION #6 -->
+                    <div id="sec-6" data-section class="scroll-mt-20 space-y-4 pt-4 border-t border-gray-800">
+                        <h2 class="text-xl font-bold text-brand-orange">#6 Menekan Fret</h2>
+                        <p class="text-gray-300 leading-relaxed">Tekan senar tepat di belakang kawat fret, bukan di tengah ruang antar fret, agar suara bersih tanpa dengung. Pakai ujung jari dan tekan secukupnya.</p>
+                    </div>
+
+                    <!-- [3B-10] SECTION #7 -->
+                    <div id="sec-7" data-section class="scroll-mt-20 space-y-4 pt-4 border-t border-gray-800">
+                        <h2 class="text-xl font-bold text-brand-orange">#7 Main Bersama Musik</h2>
+                        <p class="text-gray-300 leading-relaxed">Pilih lagu sederhana, cari nada akar (root) tiap akord, lalu mainkan satu kali per birama mengikuti ketukan. Naikkan tempo hanya setelah kamu rata di tempo sebelumnya.</p>
+                    </div>
+
+                    <!-- [3B-11] LAGU PERTAMAMU (latihan penutup) -->
+                    <div id="sec-song" data-section class="scroll-mt-20 space-y-4 pt-4 border-t border-gray-800">
+                        <h2 class="text-xl font-bold text-white">Lagu Pertamamu</h2>
+                        <p class="text-gray-300 leading-relaxed">Latihan: mainkan senar E kosong empat ketukan, lalu senar A kosong empat ketukan, dan ulangi. Mulai di 60 BPM. Jika sudah rata, naikkan perlahan.</p>
+                        <button type="button" onclick="showView('k2-detail')" class="text-sm bg-brand-orange hover:bg-amber-600 text-black font-semibold px-4 py-2 rounded-lg">Lanjut ke BassLab Dasar 2</button>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <!-- ---------- [3C] KURIKULUM 2: ringkasan + daftar Lesson Block (Gambar 7, 8) ----------
+             ISINYA DIBUAT OTOMATIS dari data KURIKULUM_2 di bagian SCRIPT [SCRIPT-C]. Cukup ubah data di sana, bukan di sini. -->
+        <section id="view-k2-detail" class="hidden space-y-6">
+            <button type="button" onclick="showView('landing')" class="text-sm text-gray-400 hover:text-white flex items-center gap-1">← Kembali ke daftar kurikulum</button>
+
+            <!-- [3C-1] Ringkasan kurikulum (judul, pengantar, daftar yang akan dipelajari) -->
+            <div class="bg-brand-card p-6 rounded-xl border border-brand-border space-y-4">
+                <h1 id="k2-title" class="text-2xl font-bold text-brand-orange"></h1>
+                <p id="k2-intro" class="text-gray-300 leading-relaxed"></p>
+                <h3 class="font-bold text-white pt-2">Di kurikulum ini kamu akan belajar:</h3>
+                <ul id="k2-outcomes" class="list-disc list-inside text-gray-300 space-y-1 text-sm"></ul>
+            </div>
+
+            <!-- [3C-2] Daftar Lesson Block (akordeon; klik judul blok untuk buka/tutup, klik pelajaran untuk membukanya) -->
+            <div class="bg-brand-card p-6 rounded-xl border border-brand-border space-y-4">
+                <h2 class="text-xl font-bold text-white mb-4">Blok Pelajaran</h2>
+                <div id="k2-blocks" class="space-y-4"></div>
+            </div>
+        </section>
+
+        <!-- ---------- [3D] ISI PELAJARAN (Gambar 9, 10) ----------
+             Satu template untuk SEMUA pelajaran. Judul, video, dan teks diisi dari data KURIKULUM_2 lewat openInsideLesson(). -->
+        <section id="view-inside-lesson" class="hidden space-y-6">
+            <!-- [3D-1] Breadcrumb -->
+            <div id="lesson-breadcrumb" class="text-xs text-gray-400 border-b border-gray-800 pb-3"></div>
+
+            <div class="bg-brand-card p-6 rounded-xl border border-brand-border space-y-6">
+                <!-- [3D-2] Judul pelajaran -->
+                <div>
+                    <div id="lesson-course-title" class="text-sm font-semibold text-brand-orange"></div>
+                    <h1 class="text-3xl font-bold text-white mt-1" id="lesson-main-title"></h1>
+                </div>
+
+                <!-- [3D-3] Video YouTube. Tampil hanya jika pelajaran punya youtubeId (diisi di data) -->
+                <div id="lesson-video" class="aspect-video bg-black rounded-xl overflow-hidden border border-gray-800 hidden"></div>
+
+                <!-- [3D-4] Teks pelajaran -->
+                <div id="lesson-body" class="space-y-4 text-gray-300 leading-relaxed text-sm md:text-base"></div>
+
+                <!-- [3D-5] Navigasi bawah: pelajaran sebelumnya / berikutnya -->
+                <div class="flex justify-between items-center border-t border-gray-800 pt-4 text-sm font-semibold">
+                    <button type="button" id="btn-prev-lesson" onclick="goLesson(-1)" class="text-gray-400 hover:text-white"></button>
+                    <button type="button" onclick="showView('k2-detail')" class="text-gray-500 hover:text-white">≡ Daftar blok</button>
+                    <button type="button" id="btn-next-lesson" onclick="goLesson(1)" class="text-brand-orange hover:underline"></button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ---------- [3E] HALAMAN "SEGERA HADIR" (dipakai menu Dashboard & Kuis yang belum dibuat) ---------- -->
+        <section id="view-soon" class="hidden">
+            <div class="bg-brand-card p-8 rounded-xl border border-brand-border text-center space-y-4 max-w-xl mx-auto">
+                <h1 id="soon-title" class="text-2xl font-bold text-white"></h1>
+                <p id="soon-desc" class="text-gray-400"></p>
+                <button type="button" onclick="switchTab('kurikulum')" class="bg-brand-orange hover:bg-amber-600 text-black font-semibold px-5 py-2 rounded-lg">Kembali ke Kurikulum</button>
+            </div>
+        </section>
+
+        <!-- =====================================================================
+             [BAGIAN 4] HALAMAN FRETBOARD INTERAKTIF + SIMULASI AKORD
+             Isi: 4A panel simulasi (akord, notasi, kontrol, info) dan 4B papan fretboard.
+             ===================================================================== -->
+        
+<!-- ---------- [4] SECTION FRETBOARD ---------- -->
+        <section id="view-fretboard" class="space-y-6">
+            
+            <!-- [4A] PANEL SIMULASI AKORD: judul akord, notasi paranada, tombol play, pilihan akord, tempo, info nada -->
+            <div class="bg-brand-card p-6 rounded-xl border border-amber-500/30 shadow-2xl space-y-6">
+                
+                <div class="flex flex-col lg:flex-row items-center justify-between gap-6 pb-4 border-b border-gray-800">
+                    <div class="space-y-1 text-center lg:text-left">
+                        <div class="inline-block px-3 py-1 bg-amber-500/10 text-amber-400 rounded-full text-xs font-semibold border border-amber-500/20">
+                            ⚡ Mode Simulasi Interaktif BassLab
+                        </div>
+                        <h2 class="text-2xl font-extrabold text-white tracking-wide" id="simChordTitle">G Minor 7♭5 (Half-Diminished)</h2>
+                        <p class="text-xs text-gray-400">Putar pola arpeggio Diminished Triad / Minor 7♭5 secara otomatis lengkap dengan notasi paranada & indikator jari.</p>
+                    </div>
+
+                    <!-- [4A-1] NOTASI PARANADA (SVG). Posisi kepala nada diatur lewat bassY di data simChords [SCRIPT-B] -->
+                    <div class="bg-[#121620] p-4 rounded-xl border border-gray-700 flex items-center gap-4 min-w-[280px] shadow-inner">
+                        <div class="text-xs text-center text-gray-400 font-mono border-r border-gray-700 pr-3">
+                            <span class="block text-amber-500 font-bold text-sm">NOTASI</span>
+                            <span>Bass Clef</span>
+                        </div>
+                        <div class="flex-1 flex justify-center">
+                            <svg id="bassClefSvg" class="w-48 h-24 bg-white/5 rounded p-1" viewBox="0 -12 200 134">
+                                <!-- Staff Lines -->
+                                <line x1="10" y1="20" x2="190" y2="20" stroke="#64748b" stroke-width="1.5"/>
+                                <line x1="10" y1="38" x2="190" y2="38" stroke="#64748b" stroke-width="1.5"/>
+                                <line x1="10" y1="56" x2="190" y2="56" stroke="#64748b" stroke-width="1.5"/>
+                                <line x1="10" y1="74" x2="190" y2="74" stroke="#64748b" stroke-width="1.5"/>
+                                <line x1="10" y1="92" x2="190" y2="92" stroke="#64748b" stroke-width="1.5"/>
+
+                                <!-- Kunci bass (digambar dengan path SVG agar tampil di semua perangkat, tidak bergantung font) -->
+                                <circle cx="24" cy="38" r="5.5" fill="#cbd5e1"/>
+                                <path d="M24 38 C 24 26, 44 26, 44 44 C 44 62, 34 78, 14 90" fill="none" stroke="#cbd5e1" stroke-width="4" stroke-linecap="round"/>
+                                <circle cx="54" cy="29" r="2.8" fill="#cbd5e1"/><circle cx="54" cy="47" r="2.8" fill="#cbd5e1"/>
+
+                                <!-- Active Note Head (Dynamic) -->
+                                <g id="activeStaffNoteGroup">
+                                    <line id="staffLedger" x1="108" y1="2" x2="138" y2="2" stroke="#64748b" stroke-width="1.5" class="hidden"/>
+                                    <ellipse id="staffNoteHead" cx="120" cy="92" rx="7" ry="5" fill="#ff8c00" transform="rotate(-20 120 92)" />
+                                    <line id="staffNoteStem" x1="126" y1="92" x2="126" y2="45" stroke="#ff8c00" stroke-width="2" />
+                                    <text id="staffAccidental" x="98" y="97" font-size="16" fill="#fbbf24" font-weight="bold" class="hidden">♭</text>
+                                </g>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- [4A-2] BARIS KONTROL SIMULATOR -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                    
+                    <!-- [4A-2a] Tombol: sebelumnya / play-pause / berikutnya / stop -->
+                    <div class="flex items-center justify-center md:justify-start gap-3">
+                        <button onclick="prevSimStep()" class="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-lg border border-gray-700 transition" title="Langkah Sebelumnya">
+                            ⏮️
+                        </button>
+                        <button id="btnSimPlay" onclick="toggleSimPlay()" class="px-6 py-3 bg-brand-orange hover:bg-amber-500 text-black font-extrabold text-sm rounded-lg shadow-lg shadow-amber-500/20 transition flex items-center gap-2">
+                            <span id="playIcon">▶</span> <span id="playText">Play Simulasi</span>
+                        </button>
+                        <button onclick="nextSimStep()" class="p-3 bg-gray-800 hover:bg-gray-700 text-white rounded-lg border border-gray-700 transition" title="Langkah Selanjutnya">
+                            ⏭️
+                        </button>
+                        <button onclick="stopSimulation()" class="p-3 bg-red-950/60 hover:bg-red-900 text-red-200 rounded-lg border border-red-800/50 transition" title="Stop">
+                            ⏹️
+                        </button>
+                    </div>
+
+                    <!-- [4A-2b] Menu pilihan akord. Tambah akord: tambah <option> di sini + satu entri di simChords [SCRIPT-B] (value harus sama dengan kuncinya) -->
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-400 mb-1">Pilih Pola Akord Simulasi:</label>
+                        <select id="simChordSelect" onchange="changeSimChord()" class="w-full bg-[#161922] border border-amber-500/40 text-amber-300 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-amber-400 font-semibold cursor-pointer">
+                            <option value="g-m7b5">G Minor 7♭5 (G - B♭ - D♭ - F - G)</option>
+                            <option value="g-dim">G Diminished Triad (G - B♭ - D♭)</option>
+                            <option value="c-m7b5">C Minor 7♭5 (C - E♭ - G♭ - B♭ - C)</option>
+                            <option value="c-dim">C Diminished Triad (C - E♭ - G♭ - C)</option>
+                            <option value="c-dim7-shape1">C Diminished 7th - Shape 1 (Jari 1 Root)</option>
+                            <option value="c-dim7-shape2">C Diminished 7th - Shape 2 (Jari 3 Root)</option>
+                            <option value="b-m7b5">B Minor 7♭5 (B - D - F - A - B)</option>
+                            <option value="f-dim7">F Diminished 7th (F - A♭ - C♭ - E♭♭ - F)</option>
+                        </select>
+                    </div>
+
+                    <!-- [4A-2c] Slider tempo (30-180 BPM) -->
+                    <div class="space-y-1">
+                        <div class="flex justify-between items-center text-xs font-semibold">
+                            <span class="text-gray-400">Tempo:</span>
+                            <span id="bpmVal" class="text-brand-orange font-mono font-extrabold text-sm">60 BPM</span>
+                        </div>
+                        <input type="range" id="bpmSlider" min="30" max="180" value="60" oninput="updateBPM(this.value)" class="w-full accent-amber-500 bg-gray-800 rounded-lg cursor-pointer h-2">
+                    </div>
+
+                </div>
+
+                <!-- [4A-3] INFO NADA AKTIF: nama nada, fungsi, posisi, jari -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 bg-[#121620] p-3 rounded-lg border border-gray-800 text-xs">
+                    <div>
+                        <span class="text-gray-500 block">Nada Saat Ini:</span>
+                        <span id="infoNote" class="text-amber-400 font-bold text-sm">G</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 block">Fungsi / Interval:</span>
+                        <span id="infoRole" class="text-white font-semibold">Root (1)</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 block">Posisi Fretboard:</span>
+                        <span id="infoPos" class="text-white font-semibold">Senar E (S4), Fret 3</span>
+                    </div>
+                    <div>
+                        <span class="text-gray-500 block">Posisi Jari (Fingering):</span>
+                        <span id="infoFinger" class="text-emerald-400 font-bold">Jari 1 (Telunjuk)</span>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- [4B] PAPAN FRETBOARD UTAMA -->
+            <div class="bg-brand-card p-6 rounded-xl border border-brand-border space-y-4">
+                
+                <!-- [4B-1] Judul papan + tombol tampil/sembunyi nama nada + filter highlight tangga nada -->
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#181d2a] p-4 rounded-xl border border-gray-800">
+                    <div>
+                        <h1 class="text-xl font-bold text-white flex items-center gap-2">
+                            <span>🎵</span> Interactive 4-String Bass Fretboard
+                        </h1>
+                        <p class="text-xs text-gray-400 mt-1">Klik pada fret mana saja untuk membunyikan frekuensi audio asli bass (Web Audio API)</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button onclick="toggleNoteDisplay()" class="bg-[#8c4a16] hover:bg-[#a6571a] text-amber-200 text-xs font-semibold px-4 py-2 rounded-lg border border-amber-600/40 transition">
+                            Tampilkan Nada: <span id="toggleStateText">Ya</span>
+                        </button>
+                        <select id="scaleFilter" onchange="highlightNotes()" class="bg-[#1c2333] border border-gray-700 text-xs text-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 cursor-pointer">
+                            <option value="all">Semua Nada Kromatis</option>
+                            <option value="dim-sim">Highlight: Akord Simulasi Diminished</option>
+                            <option value="c-major">Highlight: Tangga Nada C Mayor</option>
+                            <option value="a-minor">Highlight: Tangga Nada A Minor</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- [4B-2] Area papan (bisa digeser horizontal di HP) -->
+                <div class="overflow-x-auto bg-[#0d1017] p-4 rounded-xl border border-gray-800/90 shadow-inner">
+                    <div class="min-w-[920px] select-none">
+                        
+                        <!-- [4B-2a] Nomor fret 0-12 (bulatan oranye = penanda fret 3, 5, 7, 9, 12) -->
+                        <div class="fret-grid-row text-center text-xs font-bold text-gray-400 mb-3 items-center">
+                            <div>Senar</div>
+                            <div class="text-gray-400">Open (0)</div>
+                            <div>1</div>
+                            <div>2</div>
+                            <div><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-600 text-black font-extrabold text-[11px]">3</span></div>
+                            <div>4</div>
+                            <div><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-600 text-black font-extrabold text-[11px]">5</span></div>
+                            <div>6</div>
+                            <div><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-600 text-black font-extrabold text-[11px]">7</span></div>
+                            <div>8</div>
+                            <div><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-600 text-black font-extrabold text-[11px]">9</span></div>
+                            <div>10</div>
+                            <div>11</div>
+                            <div><span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-600 text-black font-extrabold text-[11px]">12</span></div>
+                        </div>
+
+                        <!-- [4B-2b] Empat baris senar. Tombol nadanya dibuat otomatis oleh renderFretboard() di [SCRIPT-B] -->
+                        <div class="bg-[#121620] rounded-lg border border-amber-900/20 p-3 space-y-3">
+                            
+                            <!-- STRING G (S1) -->
+                            <div class="fret-grid-row" id="row-G">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-7 h-7 rounded-md bg-[#1c2333] border border-gray-700 text-amber-500 font-bold text-xs flex items-center justify-center">G</span>
+                                    <span class="text-[10px] text-gray-500 font-mono">S1</span>
+                                </div>
+                            </div>
+
+                            <!-- STRING D (S2) -->
+                            <div class="fret-grid-row" id="row-D">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-7 h-7 rounded-md bg-[#1c2333] border border-gray-700 text-amber-500 font-bold text-xs flex items-center justify-center">D</span>
+                                    <span class="text-[10px] text-gray-500 font-mono">S2</span>
+                                </div>
+                            </div>
+
+                            <!-- STRING A (S3) -->
+                            <div class="fret-grid-row" id="row-A">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-7 h-7 rounded-md bg-[#1c2333] border border-gray-700 text-amber-500 font-bold text-xs flex items-center justify-center">A</span>
+                                    <span class="text-[10px] text-gray-500 font-mono">S3</span>
+                                </div>
+                            </div>
+
+                            <!-- STRING E (S4) -->
+                            <div class="fret-grid-row" id="row-E">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-7 h-7 rounded-md bg-[#1c2333] border border-gray-700 text-amber-500 font-bold text-xs flex items-center justify-center">E</span>
+                                    <span class="text-[10px] text-gray-500 font-mono">S4</span>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+    </main>
+
+    <!-- =====================================================================
+         [BAGIAN 5] FOOTER. Ubah teks di sini
+         ===================================================================== -->
+    <footer class="border-t border-gray-800 py-6 text-center text-xs text-gray-500">
+        BassLab, platform belajar bass interaktif.
+    </footer>
+
+    <!-- =====================================================================
+         [SCRIPT] SELURUH LOGIKA HALAMAN (A audio, B fretboard & simulasi, C konten, D render pelajaran, E navigasi, F init)
+         ===================================================================== -->
+    <script>
+        /* [SCRIPT-A] AUDIO: AudioContext dibuat saat klik pertama (browser memblokir audio sebelum ada interaksi) */
+        let audioCtx = null;
+        let showNotes = true;
+
+        /* [SCRIPT-B] DATA SENAR: frekuensi senar kosong (E1, A1, D2, G2) dan urutan nada per fret 0-12. Rumus frekuensi: f = f0 x 2^(fret/12) */
+        const stringsData = {
+            'G': { baseFreq: 98.00, notes: ['G', 'G#', 'A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G'] },
+            'D': { baseFreq: 73.42, notes: ['D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B', 'C', 'C#', 'D'] },
+            'A': { baseFreq: 55.00, notes: ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A'] },
+            'E': { baseFreq: 41.20, notes: ['E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E'] }
+        };
+
+        /* DATA AKORD SIMULASI. Tiap akord = daftar nada berurutan. Arti field:
+           note=nama nada (kres) | disp=nama tampil | string & fret=posisi di fretboard | role=fungsi nada
+           finger=jari | bassY=posisi kepala nada di paranada (92=garis 1 G2, tiap langkah 9; 2=garis bantu C4)
+           flat/accidentalText=tanda mol di paranada */
+        const simChords = {
+            'g-m7b5': {
+                name: 'G Minor 7♭5 (Half-Diminished)',
+                notes: [
+                    { note: 'G',  disp: 'G',  string: 'E', fret: 3, role: 'Root (1)', finger: '1 (Telunjuk)', bassY: 92, flat: false, accidentalText: '' },
+                    { note: 'A#', disp: 'B♭', string: 'A', fret: 1, role: 'Flat 3rd (♭3)', finger: '4 (Kelingking)', bassY: 74, flat: true, accidentalText: '♭' },
+                    { note: 'C#', disp: 'D♭', string: 'A', fret: 4, role: 'Flat 5th (♭5)', finger: '2 (Jari Tengah)', bassY: 56, flat: true, accidentalText: '♭' },
+                    { note: 'F',  disp: 'F',  string: 'D', fret: 3, role: 'Flat 7th (♭7)', finger: '1 (Telunjuk)', bassY: 38, flat: false, accidentalText: '' },
+                    { note: 'G',  disp: 'G',  string: 'D', fret: 5, role: 'Octave Root (8)', finger: '3 (Jari Manis)', bassY: 29, flat: false, accidentalText: '' }
+                ]
+            },
+            'g-dim': {
+                name: 'G Diminished Triad',
+                notes: [
+                    { note: 'G',  disp: 'G',  string: 'E', fret: 3, role: 'Root (1)', finger: '1 (Telunjuk)', bassY: 92, flat: false, accidentalText: '' },
+                    { note: 'A#', disp: 'B♭', string: 'A', fret: 1, role: 'Flat 3rd (♭3)', finger: '4 (Kelingking)', bassY: 74, flat: true, accidentalText: '♭' },
+                    { note: 'C#', disp: 'D♭', string: 'A', fret: 4, role: 'Flat 5th (♭5)', finger: '2 (Jari Tengah)', bassY: 56, flat: true, accidentalText: '♭' }
+                ]
+            },
+            'c-m7b5': {
+                name: 'C Minor 7♭5',
+                notes: [
+                    { note: 'C',  disp: 'C',  string: 'A', fret: 3, role: 'Root (1)', finger: '1 (Telunjuk)', bassY: 65, flat: false, accidentalText: '' },
+                    { note: 'D#', disp: 'E♭', string: 'D', fret: 1, role: 'Flat 3rd (♭3)', finger: '4 (Kelingking)', bassY: 47, flat: true, accidentalText: '♭' },
+                    { note: 'F#', disp: 'G♭', string: 'D', fret: 4, role: 'Flat 5th (♭5)', finger: '2 (Jari Tengah)', bassY: 29, flat: true, accidentalText: '♭' },
+                    { note: 'A#', disp: 'B♭', string: 'G', fret: 3, role: 'Flat 7th (♭7)', finger: '1 (Telunjuk)', bassY: 11, flat: true, accidentalText: '♭' },
+                    { note: 'C',  disp: 'C',  string: 'G', fret: 5, role: 'Octave Root (8)', finger: '3 (Jari Manis)', bassY: 2, flat: false, accidentalText: '' }
+                ]
+            },
+            'c-dim': {
+                name: 'C Diminished Triad (Cdim)',
+                notes: [
+                    { note: 'C',  disp: 'C',  string: 'A', fret: 3, role: 'Root (1)', finger: '1 (Telunjuk)', bassY: 65, flat: false, accidentalText: '' },
+                    { note: 'D#', disp: 'E♭', string: 'A', fret: 6, role: 'Flat 3rd (♭3)', finger: '4 (Kelingking)', bassY: 47, flat: true, accidentalText: '♭' },
+                    { note: 'F#', disp: 'G♭', string: 'D', fret: 4, role: 'Flat 5th (♭5)', finger: '2 (Jari Tengah)', bassY: 29, flat: true, accidentalText: '♭' },
+                    { note: 'C',  disp: 'C',  string: 'G', fret: 5, role: 'Octave Root (8)', finger: '3 (Jari Manis)', bassY: 2, flat: false, accidentalText: '' }
+                ]
+            },
+            'c-dim7-shape1': {
+                name: 'C Diminished 7th - Shape 1 (Jari 1 Root)',
+                notes: [
+                    { note: 'C',  disp: 'C',   string: 'A', fret: 3, role: 'Root (1)', finger: '1 (Telunjuk)', bassY: 65, flat: false, accidentalText: '' },
+                    { note: 'D#', disp: 'E♭',  string: 'A', fret: 6, role: 'Flat 3rd (♭3)', finger: '4 (Kelingking)', bassY: 47, flat: true, accidentalText: '♭' },
+                    { note: 'F#', disp: 'G♭',  string: 'D', fret: 4, role: 'Flat 5th (♭5)', finger: '1 (Telunjuk)', bassY: 29, flat: true, accidentalText: '♭' },
+                    { note: 'A',  disp: 'B♭♭', string: 'G', fret: 2, role: 'Diminished 7th (♭♭7)', finger: '4 (Kelingking)', bassY: 11, flat: true, accidentalText: '♭♭' },
+                    { note: 'C',  disp: 'C',   string: 'G', fret: 5, role: 'Octave Root (8)', finger: '2 (Jari Tengah)', bassY: 2, flat: false, accidentalText: '' }
+                ]
+            },
+            'c-dim7-shape2': {
+                name: 'C Diminished 7th - Shape 2 (Jari 3 Root)',
+                notes: [
+                    { note: 'C',  disp: 'C',   string: 'A', fret: 3, role: 'Root (1)', finger: '3 (Jari Manis)', bassY: 65, flat: false, accidentalText: '' },
+                    { note: 'D#', disp: 'E♭',  string: 'D', fret: 1, role: 'Flat 3rd (♭3)', finger: '1 (Telunjuk)', bassY: 47, flat: true, accidentalText: '♭' },
+                    { note: 'F#', disp: 'G♭',  string: 'D', fret: 4, role: 'Flat 5th (♭5)', finger: '4 (Kelingking)', bassY: 29, flat: true, accidentalText: '♭' },
+                    { note: 'A',  disp: 'B♭♭', string: 'G', fret: 2, role: 'Diminished 7th (♭♭7)', finger: '1 (Telunjuk)', bassY: 11, flat: true, accidentalText: '♭♭' },
+                    { note: 'C',  disp: 'C',   string: 'G', fret: 5, role: 'Octave Root (8)', finger: '4 (Kelingking)', bassY: 2, flat: false, accidentalText: '' }
+                ]
+            },
+            'b-m7b5': {
+                name: 'B Minor 7♭5 (Bm7♭5)',
+                notes: [
+                    { note: 'B',  disp: 'B',  string: 'A', fret: 2, role: 'Root (1)', finger: '1 (Telunjuk)', bassY: 74, flat: false, accidentalText: '' },
+                    { note: 'D',  disp: 'D',  string: 'A', fret: 5, role: 'Flat 3rd (♭3)', finger: '4 (Kelingking)', bassY: 56, flat: false, accidentalText: '' },
+                    { note: 'F',  disp: 'F',  string: 'D', fret: 3, role: 'Flat 5th (♭5)', finger: '2 (Jari Tengah)', bassY: 38, flat: false, accidentalText: '' },
+                    { note: 'A',  disp: 'A',  string: 'G', fret: 2, role: 'Flat 7th (♭7)', finger: '1 (Telunjuk)', bassY: 20, flat: false, accidentalText: '' },
+                    { note: 'B',  disp: 'B',  string: 'G', fret: 4, role: 'Octave Root (8)', finger: '3 (Jari Manis)', bassY: 11, flat: false, accidentalText: '' }
+                ]
+            },
+            'f-dim7': {
+                name: 'F Diminished 7th (Fdim7)',
+                notes: [
+                    { note: 'F',  disp: 'F',   string: 'E', fret: 1, role: 'Root (1)', finger: '1 (Telunjuk)', bassY: 101, flat: false, accidentalText: '' },
+                    { note: 'G#', disp: 'A♭',  string: 'E', fret: 4, role: 'Flat 3rd (♭3)', finger: '4 (Kelingking)', bassY: 83, flat: true, accidentalText: '♭' },
+                    { note: 'B',  disp: 'C♭',  string: 'A', fret: 2, role: 'Flat 5th (♭5)', finger: '1 (Telunjuk)', bassY: 65, flat: true, accidentalText: '♭' },
+                    { note: 'D',  disp: 'E♭♭', string: 'A', fret: 5, role: 'Diminished 7th (♭♭7)', finger: '4 (Kelingking)', bassY: 47, flat: true, accidentalText: '♭♭' },
+                    { note: 'F',  disp: 'F',   string: 'D', fret: 3, role: 'Octave Root (8)', finger: '3 (Jari Manis)', bassY: 38, flat: false, accidentalText: '' }
+                ]
+            }
+        };
+
+        let simPlaying = false;
+        let simTimer = null;
+        let currentSimIndex = 0;
+        let simBPM = 60;
+        let selectedChordKey = 'g-m7b5';
+
+        function getAudioCtx() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            return audioCtx;
+        }
+
+        // Suara bass sederhana: gelombang sawtooth + low-pass filter + peluruhan 1,2 detik
+        function playBassTone(freq) {
+            const ctx = getAudioCtx();
+            const now = ctx.currentTime;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            const filter = ctx.createBiquadFilter();
+
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(freq, now);
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(400, now);
+            gain.gain.setValueAtTime(0.4, now);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now);
+            osc.stop(now + 1.2);
+        }
+
+        // Render Fretboard Nodes
+        function renderFretboard() {
+            Object.keys(stringsData).forEach(strKey => {
+                const row = document.getElementById(`row-${strKey}`);
+                const data = stringsData[strKey];
+
+                data.notes.forEach((note, fretIdx) => {
+                    const cell = document.createElement('div');
+                    cell.className = `fret-cell ${fretIdx === 0 ? 'nut-cell' : ''}`;
+                    
+                    const freq = data.baseFreq * Math.pow(2, fretIdx / 12);
+                    const btn = document.createElement('button');
+                    btn.className = 'note-btn';
+                    btn.innerText = note;
+                    btn.dataset.note = note;
+                    btn.dataset.string = strKey;
+                    btn.dataset.fret = fretIdx;
+                    btn.onclick = () => playBassTone(freq);
+
+                    cell.appendChild(btn);
+                    row.appendChild(cell);
+                });
+            });
+        }
+
+        // --- MANAJEMEN SIMULASI PLAY CHORD & NOTASI ---
+        function changeSimChord() {
+            selectedChordKey = document.getElementById('simChordSelect').value;
+            document.getElementById('simChordTitle').innerText = simChords[selectedChordKey].name;
+            stopSimulation();
+            highlightSimChordOnFretboard();
+            highlightNotes();
+            renderSimStep(0, false);
+        }
+
+        function highlightSimChordOnFretboard() {
+            // Bersihkan badge & kelas sebelumnya
+            document.querySelectorAll('.finger-badge').forEach(b => b.remove());
+            document.querySelectorAll('.note-btn').forEach(btn => {
+                btn.classList.remove('chord-member', 'active-sim');
+            });
+
+            const currentChord = simChords[selectedChordKey];
+            currentChord.notes.forEach(nData => {
+                const btn = document.querySelector(`.note-btn[data-string="${nData.string}"][data-fret="${nData.fret}"]`);
+                if (btn) {
+                    btn.classList.add('chord-member');
+                    // Buat badge jari
+                    const badge = document.createElement('span');
+                    badge.className = 'finger-badge';
+                    badge.innerText = nData.finger.charAt(0);
+                    btn.parentElement.appendChild(badge);
+                }
+            });
+        }
+
+        function renderSimStep(index, playSound = true) {
+            const chordData = simChords[selectedChordKey];
+            if (!chordData || index >= chordData.notes.length) return;
+
+            currentSimIndex = index;
+            const nData = chordData.notes[index];
+
+            // 1. Reset status tombol aktif
+            document.querySelectorAll('.note-btn').forEach(b => b.classList.remove('active-sim'));
+
+            // 2. Sorot tombol fretboard aktif
+            const activeBtn = document.querySelector(`.note-btn[data-string="${nData.string}"][data-fret="${nData.fret}"]`);
+            if (activeBtn) {
+                activeBtn.classList.add('active-sim');
+                if (playSound) {
+                    const baseF = stringsData[nData.string].baseFreq;
+                    const freq = baseF * Math.pow(2, nData.fret / 12);
+                    playBassTone(freq);
+                }
+            }
+
+            // 3. Update info text
+            document.getElementById('infoNote').innerText = nData.disp;
+            document.getElementById('infoRole').innerText = nData.role;
+            document.getElementById('infoPos').innerText = `Senar ${nData.string} (S${getStringNum(nData.string)}), Fret ${nData.fret}`;
+            document.getElementById('infoFinger').innerText = `Jari ${nData.finger}`;
+
+            // 4. Update notasi paranada (SVG)
+            const head = document.getElementById('staffNoteHead');
+            const stem = document.getElementById('staffNoteStem');
+            const acc = document.getElementById('staffAccidental');
+            const ledger = document.getElementById('staffLedger');
+
+            if (head && stem) {
+                head.setAttribute('cy', nData.bassY);
+                head.setAttribute('transform', `rotate(-20 120 ${nData.bassY})`);
+
+                // Tangkai ke atas bila nada di bawah garis tengah, ke bawah bila di atas
+                const up = nData.bassY > 56;
+                stem.setAttribute('x1', up ? 126 : 114);
+                stem.setAttribute('x2', up ? 126 : 114);
+                stem.setAttribute('y1', nData.bassY);
+                stem.setAttribute('y2', up ? nData.bassY - 40 : nData.bassY + 40);
+
+                if (nData.flat || nData.accidentalText) {
+                    acc.innerText = nData.accidentalText || '♭';
+                    acc.classList.remove('hidden');
+                    acc.setAttribute('y', nData.bassY + 5);
+                } else {
+                    acc.classList.add('hidden');
+                }
+
+                // Garis bantu untuk nada di atas paranada (C4)
+                if (ledger) ledger.classList.toggle('hidden', nData.bassY > 2);
+            }
+        }
+
+        function getStringNum(str) {
+            if (str === 'G') return 1;
+            if (str === 'D') return 2;
+            if (str === 'A') return 3;
+            if (str === 'E') return 4;
+            return 1;
+        }
+
+        function toggleSimPlay() {
+            if (simPlaying) pauseSimulation();
+            else startSimulation();
+        }
+
+        function startSimulation(playNow = true) {
+            clearInterval(simTimer);
+            simPlaying = true;
+            document.getElementById('playIcon').innerText = '⏸';
+            document.getElementById('playText').innerText = 'Pause';
+
+            const intervalMs = (60 / simBPM) * 1000;
+            if (playNow) renderSimStep(currentSimIndex, true);
+
+            simTimer = setInterval(() => {
+                const chordData = simChords[selectedChordKey];
+                let nextIdx = currentSimIndex + 1;
+                if (nextIdx >= chordData.notes.length) nextIdx = 0;
+                renderSimStep(nextIdx, true);
+            }, intervalMs);
+        }
+
+        function pauseSimulation() {
+            simPlaying = false;
+            clearInterval(simTimer);
+            document.getElementById('playIcon').innerText = '▶';
+            document.getElementById('playText').innerText = 'Play Simulasi';
+        }
+
+        function stopSimulation() {
+            pauseSimulation();
+            currentSimIndex = 0;
+            renderSimStep(0, false);
+        }
+
+        function nextSimStep() {
+            pauseSimulation();
+            const chordData = simChords[selectedChordKey];
+            let nextIdx = currentSimIndex + 1;
+            if (nextIdx >= chordData.notes.length) nextIdx = 0;
+            renderSimStep(nextIdx, true);
+        }
+
+        function prevSimStep() {
+            pauseSimulation();
+            const chordData = simChords[selectedChordKey];
+            let prevIdx = currentSimIndex - 1;
+            if (prevIdx < 0) prevIdx = chordData.notes.length - 1;
+            renderSimStep(prevIdx, true);
+        }
+
+        function updateBPM(val) {
+            simBPM = parseInt(val);
+            document.getElementById('bpmVal').innerText = `${simBPM} BPM`;
+            if (simPlaying) startSimulation(false); // ganti tempo tanpa membunyikan ulang nada
+        }
+
+        function toggleNoteDisplay() {
+            showNotes = !showNotes;
+            document.getElementById('toggleStateText').innerText = showNotes ? 'Ya' : 'Tidak';
+            document.querySelectorAll('.note-btn').forEach(btn => {
+                if (showNotes) btn.classList.remove('note-hidden');
+                else btn.classList.add('note-hidden');
+            });
+        }
+
+        function highlightNotes() {
+            const filter = document.getElementById('scaleFilter').value;
+            const cMajor = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+            const aMinor = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+            const chordKeys = new Set(simChords[selectedChordKey].notes.map(n => `${n.string}-${n.fret}`));
+
+            document.querySelectorAll('.note-btn').forEach(btn => {
+                let active = true;
+                if (filter === 'c-major') active = cMajor.includes(btn.dataset.note);
+                if (filter === 'a-minor') active = aMinor.includes(btn.dataset.note);
+                if (filter === 'dim-sim') active = chordKeys.has(`${btn.dataset.string}-${btn.dataset.fret}`);
+                btn.classList.toggle('dimmed', !active);
+            });
+        }
+
+        /* =====================================================================
+           [SCRIPT-C] KONTEN: ISI KURIKULUM 2  ← TEMPAT UTAMA MENGISI MATERI
+           Cara menambah pelajaran: salin satu objek { id, title, youtubeId, sections } di dalam "lessons".
+           - id        : unik, tanpa spasi (contoh 'f2-l6')
+           - youtubeId : 11 karakter di akhir link YouTube (youtube.com/watch?v=XXXXXXXXXXX). Kosongkan '' bila belum ada video.
+                         Hanya pakai video milik sendiri atau yang pemiliknya izinkan untuk disematkan.
+           - sections  : daftar { h: 'judul bagian', p: 'isi paragraf' }
+           Cara menambah blok: salin satu objek di dalam "blocks".
+           TEMPLATE ISI PELAJARAN (isi per pelajaran): tujuan belajar, 2–3 bagian penjelasan, satu latihan, (opsional) video.
+           ===================================================================== */
+        const KURIKULUM_2 = {
+            judul: 'BassLab Dasar 2',
+            intro: 'Kamu sudah punya fondasi dari Dasar 1. Di tahap ini kita mengenal tangga nada dan nada penyusun akord, lalu menutup dengan struktur blues.',
+            outcomes: [
+                'Tangga nada mayor dan polanya',
+                'Root, 3rd, dan 5th pada akord',
+                'Akord diminished dan half-diminished (simulasinya ada di tab Fretboard)',
+                'Struktur 12-bar blues'
+            ],
+            blocks: [
+                {
+                    title: 'Pengenalan Tangga Nada',
+                    desc: 'Apa itu tangga nada dan tangga nada C mayor.',
+                    lessons: [
+                        { id: 'f2-l1', title: 'Apa Itu Tangga Nada', youtubeId: '', sections: [
+                            { h: 'Kumpulan nada', p: 'Tangga nada adalah kumpulan nada yang disusun naik atau turun dengan pola jarak tertentu. Dari 12 nada kromatis, tangga nada mayor memilih 7 nada.' },
+                            { h: 'Jarak antar nada', p: 'Jarak satu fret disebut setengah nada (semitone), dua fret disebut satu nada penuh (whole tone). Pola jarak inilah yang membedakan satu tangga nada dari yang lain.' }
+                        ] },
+                        { id: 'f2-l2', title: 'Tangga Nada C Mayor', youtubeId: '', sections: [
+                            { h: 'Susunan nada', p: 'C mayor berisi C, D, E, F, G, A, B. Polanya dari nada akar: penuh, penuh, setengah, penuh, penuh, penuh, setengah.' },
+                            { h: 'Coba di fretboard', p: 'Buka tab Fretboard, pilih "Highlight: Tangga Nada C Mayor", lalu bunyikan tiap nada yang menyala.' }
+                        ] }
+                    ]
+                },
+                {
+                    title: 'Nada Akord',
+                    desc: 'Root, 3rd, 5th, dan akord diminished.',
+                    lessons: [
+                        { id: 'f2-l3', title: 'Nada Penyusun Akord', youtubeId: '', sections: [
+                            { h: 'Root, 3rd, 5th', p: 'Triad mayor tersusun dari nada ke-1 (root), ke-3, dan ke-5 tangga nada mayor. Pada C mayor: C, E, G.' },
+                            { h: 'Peran bassist', p: 'Bassist sering memulai dari root, lalu menambahkan 5th sebagai pengisi.' }
+                        ] },
+                        { id: 'f2-l4', title: 'Akord Diminished dan Half-Diminished', youtubeId: '', sections: [
+                            { h: 'Triad diminished', p: 'Triad diminished tersusun dari root, minor 3rd, dan flat 5th. Contoh C diminished: C, E♭, G♭.' },
+                            { h: 'Half-diminished dan diminished 7th', p: 'Minor 7♭5 (half-diminished) menambahkan flat 7th: C, E♭, G♭, B♭. Diminished 7th memakai ♭♭7: C, E♭, G♭, B♭♭ (terdengar sama dengan A).' },
+                            { h: 'Coba simulasinya', p: 'Di tab Fretboard, pilih pola akord pada menu simulasi lalu tekan Play untuk melihat posisi nada, notasi paranada, dan jari yang dipakai.' }
+                        ] }
+                    ]
+                },
+                {
+                    title: 'Blues 12 Birama',
+                    desc: 'Struktur dasar musik blues.',
+                    lessons: [
+                        { id: 'f2-l5', title: 'Bentuk 12-Bar Blues', youtubeId: '', sections: [
+                            { h: 'Tiga akord', p: 'Satu putaran blues terdiri dari 12 birama dengan akord I, IV, dan V. Dalam kunci A, ketiganya adalah A, D, dan E.' },
+                            { h: 'Pola umum', p: 'Empat birama akord I, dua birama IV, dua birama I, satu birama V, satu birama IV, lalu dua birama I. Birama terakhir sering diganti V sebagai turnaround.' }
+                        ] }
+                    ]
+                }
+            ]
+        };
+
+        // Teks untuk menu yang belum dibuat (Dashboard, Kuis). Hapus entri ini setelah halamannya jadi.
+        const SOON = {
+            dashboard: { title: 'Dashboard (segera hadir)', desc: 'Ringkasan level, XP, dan progres belajar akan tampil di sini setelah fitur login aktif.' },
+            kuis: { title: 'Kuis Praktik (segera hadir)', desc: 'Kuis di akhir setiap blok pelajaran akan tersedia setelah fitur login dan penyimpanan nilai aktif.' }
+        };
+
+        const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        /* =====================================================================
+           [SCRIPT-D] RENDER DAFTAR BLOK & HALAMAN PELAJARAN (membaca data KURIKULUM_2)
+           ===================================================================== */
+        const LESSON_ORDER = KURIKULUM_2.blocks.flatMap(b => b.lessons.map(l => ({ ...l, blockTitle: b.title })));
+        let currentLessonIdx = 0;
+
+        function renderKurikulum2() {
+            document.getElementById('k2-title').innerText = KURIKULUM_2.judul;
+            document.getElementById('k2-intro').innerText = KURIKULUM_2.intro;
+            document.getElementById('k2-outcomes').innerHTML = KURIKULUM_2.outcomes.map(o => `<li>${esc(o)}</li>`).join('');
+            document.getElementById('k2-blocks').innerHTML = KURIKULUM_2.blocks.map((b, i) => `
+                <div class="border border-gray-800 rounded-lg overflow-hidden">
+                    <button type="button" class="w-full p-4 bg-gray-900/80 flex justify-between items-center text-left" onclick="toggleBlock('blk-${i}')" aria-expanded="${i === 0}">
+                        <span class="font-bold text-gray-200">${esc(b.title)}</span>
+                        <span class="text-xs text-gray-500">${b.lessons.length} pelajaran</span>
+                    </button>
+                    <div id="blk-${i}" class="${i === 0 ? '' : 'hidden'} p-4 bg-black/30 space-y-3 text-sm">
+                        <p class="text-gray-400 text-xs mb-3">${esc(b.desc)}</p>
+                        ${b.lessons.map(l => `
+                            <button type="button" onclick="openInsideLesson('${esc(l.id)}')" class="w-full p-2 bg-gray-800/50 rounded flex justify-between items-center hover:bg-gray-800 text-left">
+                                <span class="text-gray-200">☆ ${esc(l.title)}</span>
+                                <span class="text-xs text-brand-orange">Buka pelajaran →</span>
+                            </button>`).join('')}
+                    </div>
+                </div>`).join('');
+        }
+
+        function toggleBlock(id) {
+            const el = document.getElementById(id);
+            el.classList.toggle('hidden');
+            el.previousElementSibling.setAttribute('aria-expanded', String(!el.classList.contains('hidden')));
+        }
+
+        function openInsideLesson(id) {
+            const idx = LESSON_ORDER.findIndex(l => l.id === id);
+            if (idx < 0) return;
+            const l = LESSON_ORDER[idx];
+            currentLessonIdx = idx;
+
+            document.getElementById('lesson-breadcrumb').innerHTML =
+                `Kurikulum &gt; ${esc(KURIKULUM_2.judul)} &gt; ${esc(l.blockTitle)} &gt; <span class="text-brand-orange font-semibold">${esc(l.title)}</span>`;
+            document.getElementById('lesson-course-title').innerText = KURIKULUM_2.judul;
+            document.getElementById('lesson-main-title').innerText = l.title;
+
+            const video = document.getElementById('lesson-video');
+            if (/^[\w-]{11}$/.test(l.youtubeId || '')) {
+                video.innerHTML = `<iframe class="w-full h-full" src="https://www.youtube-nocookie.com/embed/${l.youtubeId}" title="Video: ${esc(l.title)}" loading="lazy" allowfullscreen></iframe>`;
+                video.classList.remove('hidden');
+            } else {
+                video.innerHTML = '';
+                video.classList.add('hidden');
+            }
+
+            document.getElementById('lesson-body').innerHTML =
+                l.sections.map(s => `<h3 class="text-lg font-bold text-white">${esc(s.h)}</h3><p>${esc(s.p)}</p>`).join('');
+            document.getElementById('btn-prev-lesson').innerText = idx === 0 ? '< Awal Kurikulum' : '< Pelajaran Sebelumnya';
+            document.getElementById('btn-next-lesson').innerText = idx === LESSON_ORDER.length - 1 ? 'Selesai, ke Daftar Blok >' : 'Pelajaran Berikutnya >';
+            showView('inside-lesson');
+        }
+
+        function goLesson(delta) {
+            const n = currentLessonIdx + delta;
+            if (n < 0 || n >= LESSON_ORDER.length) { showView('k2-detail'); return; }
+            openInsideLesson(LESSON_ORDER[n].id);
+        }
+
+        /* =====================================================================
+           [SCRIPT-E] NAVIGASI ANTAR HALAMAN
+           showView('id-halaman') menampilkan <section id="view-id-halaman">.
+           Halaman baru: buat <section id="view-xxx" class="hidden">, tambahkan 'xxx' ke VIEWS dan (bila perlu) ke NAV_OF.
+           ===================================================================== */
+        const VIEWS = ['landing', 'k1-detail', 'k2-detail', 'inside-lesson', 'soon', 'fretboard'];
+        const NAV_OF = { 'landing': 'kurikulum', 'k1-detail': 'kurikulum', 'k2-detail': 'kurikulum', 'inside-lesson': 'kurikulum', 'fretboard': 'fretboard' };
+        const NAV_ACTIVE = 'px-3 py-2 rounded-md bg-amber-500/10 text-brand-orange font-semibold whitespace-nowrap';
+        const NAV_IDLE = 'px-3 py-2 rounded-md text-gray-400 hover:text-white whitespace-nowrap';
+
+        function showView(viewId, navKey) {
+            VIEWS.forEach(v => document.getElementById('view-' + v).classList.add('hidden'));
+            document.getElementById('view-' + viewId).classList.remove('hidden');
+            const active = navKey || NAV_OF[viewId];
+            document.querySelectorAll('[data-nav]').forEach(b => { b.className = b.dataset.nav === active ? NAV_ACTIVE : NAV_IDLE; });
+            window.scrollTo({ top: 0 });
+            if (viewId === 'k1-detail') watchK1Sections();
+        }
+
+        function switchTab(tab) {
+            if (tab === 'fretboard') showView('fretboard');
+            else if (tab === 'kurikulum') showView('landing');
+            else if (SOON[tab]) {
+                document.getElementById('soon-title').innerText = SOON[tab].title;
+                document.getElementById('soon-desc').innerText = SOON[tab].desc;
+                showView('soon', tab);
+            }
+        }
+
+        function openKurikulum1() { showView('k1-detail'); }
+        function openKurikulum2() { showView('k2-detail'); }
+
+        // Menyorot item sidebar Kurikulum 1 sesuai bagian yang sedang dibaca
+        let k1Observer = null;
+        function watchK1Sections() {
+            if (k1Observer) k1Observer.disconnect();
+            if (!('IntersectionObserver' in window)) return;
+            const links = document.querySelectorAll('#k1-sidebar a[data-sec]');
+            k1Observer = new IntersectionObserver(entries => {
+                entries.forEach(e => {
+                    if (e.isIntersecting) links.forEach(l => l.classList.toggle('active-sec', l.dataset.sec === e.target.id));
+                });
+            }, { rootMargin: '-15% 0px -70% 0px' });
+            document.querySelectorAll('#view-k1-detail [data-section]').forEach(s => k1Observer.observe(s));
+        }
+
+        /* =====================================================================
+           [SCRIPT-F] INISIALISASI (jalan sekali saat halaman dibuka). Ubah showView('...') untuk mengganti halaman awal.
+           ===================================================================== */
+        renderFretboard();
+        highlightSimChordOnFretboard();
+        renderSimStep(0, false);
+        renderKurikulum2();
+        showView('landing');
+    
+</script>
+</body>
+</html>
